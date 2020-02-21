@@ -101,5 +101,25 @@ module.exports = {
             return fv;
         }
 
+    },
+    fetchCol: async function(sql){
+        let qr = await this.query(sql);
+        if(!qr){
+
+            return false;
+        }else{
+
+            let fv= [];
+            for(let f1 in qr){
+
+                for(let f2 in qr[f1]){
+
+                    fv.push(qr[f1][f2]);
+                    break;
+                }
+            }    
+            return fv;
+        }
+
     }
 }

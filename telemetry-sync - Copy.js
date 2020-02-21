@@ -101,10 +101,8 @@ async function pulldown(){
   for(let _p in platforms){
     
     matches = await matchesOfPlatform(platforms[_p]);
-    console.log( 'platform : ' + platforms[_p] + ', total matches : ' + matches.length + ', endpoint url : ' + '/shards/'+platforms[_p]+'/samples')
-    continue;
-
     if(!matches || !matches.length) break;
+    
     //match level loop
     for(let _m in matches){
       matchDetails = await detailsOfMatch(matches[_m].id, platforms[_p])
