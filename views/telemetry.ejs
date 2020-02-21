@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang='en'>
     <%- include('header', { libs: [{ type: 'text/css', rel: 'stylesheet', href: 'chartist.min.css'}]}) %>
-    <body onload="showPreloader();getTelemetries()">
+    <body onload="showPreloader();initCharts()/**getTelemetries()**/">
         <%- include('topnav', { active: 'Telemetry' }) %>
         <div id="preloader" class="preloader-wrapper">
             <div class="spinner-layer spinner-yellow-only">
@@ -93,4 +93,5 @@
         </div>
     
     <%- include('footer') %>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.15/lodash.min.js"></script>
 </html>

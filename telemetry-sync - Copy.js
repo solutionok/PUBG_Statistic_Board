@@ -2,7 +2,7 @@ const axios = require('axios');
 const { Sequelize } = require('sequelize');
 const moment = require('moment');
 const _ = require('lodash');
-const fs = require('fs');
+
 const configs = require('./configs.json');
 const mysqlfunc = require('./scripts/mysqlfunc.js');
 
@@ -99,18 +99,11 @@ async function pulldown(){
 
   //platform level loop
   for(let _p in platforms){
-    let kk = Object.keys(REGIONS)
-    for(let dev in kk){
+    
+    matches = await matchesOfPlatform(platforms[_p]);
+    console.log( 'platform : ' + platforms[_p] + ', total matches : ' + matches.length + ', endpoint url : ' + '/shards/'+platforms[_p]+'/samples')
+    continue;
 
-      matches = await matchesOfPlatform(platforms[_p] + '-pc-' + kk[dev]);
-      fs.writeFile('z'+platforms[_p] + '-pc-' + kk[dev] + '.json', JSON.stringify(matches), (e)=>{
-
-      })
-
-      console.log( 'platform : ' + platforms[_p] + '-pc-' + kk[dev] + ', total matches : ' + matches.length + ', endpoint url : ' + '/shards/'+platforms[_p] + '-pc-' + kk[dev]+'/samples')
-      await sleep(6000);
-    }
-continue;
     if(!matches || !matches.length) break;
     //match level loop
     for(let _m in matches){
@@ -152,16 +145,9 @@ continue;
 
   }
 
+  setTimeout(function(){
+
+    pulldown();
+  }, 5000)
 }
-
-async function pullcall(){
-  await pulldown().then(r=>{
-    
-    setTimeout(function(){
-
-      pullcall();
-    }, 5000)
-  })
-}
-
-pullcall();
+pulldown();

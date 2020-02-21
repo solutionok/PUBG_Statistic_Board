@@ -493,3 +493,305 @@ const getTelemetries = () => {
         }
     });
 };
+
+const initCharts = () => {
+
+    $.ajax({
+        url: `${BASEURL}fetchTelemetryData`,
+        dataType: 'json',
+        method: 'GET',
+        error: (e, txt, xhr) => console.error(e),
+        success: (data, txt, xhr) => {
+            
+            const colors = {
+                'Baltic_Main': "rgb(232, 211, 63)",
+                'Desert_Main': "rgb(209, 123, 15)",
+                'DihorOtok_Main': "rgb(183, 173, 207)",
+                'Savage_Main': "rgb(64, 112, 118)",
+                'Summerland_Main': "rgb(116,179,206)",
+                'Other': 'rgb(101, 101, 102)'
+            };
+            let tfpp = {tpp: 0, fpp: 0};
+            let logPlayerCount = 0;
+            let modeCount = [0,0,0,0,0,0];
+            let modeCode = [ 'solo', 'duo', 'squad', 'solo-fpp', 'duo-fpp', 'squad-fpp'];
+            let regionCode = Object.values(MAPPINGS)
+            let dataByRegion = {}
+            modeCode.map((e)=>dataByRegion[e] = [0,0,0,0,0,0,0,0,0,0])
+            let dataByMaps = {}
+            let mapcodes = Object.keys(data.mapNames)
+            let mapByRegioin = {}
+            Object.keys(data.mapNames).map((e)=>mapByRegioin[e] = [0,0,0,0,0,0,0,0,0,0])
+
+            data.matches.map((e)=>{
+                logPlayerCount += e.player_count*1;
+
+
+                if(e.game_mode.indexOf('-fpp')===-1) tfpp.tpp++;
+                else tfpp.fpp++;
+
+                modeCount[modeCode.indexOf(e.game_mode)]++;
+
+                if(e.region_code){
+                    dataByRegion[e.game_mode][regionCode.indexOf(e.region_code)]++;
+                    mapByRegioin[e.map_name][regionCode.indexOf(e.region_code)]++;
+                }
+
+                if(!dataByMaps[e.game_mode]){
+                    dataByMaps[e.game_mode] = mapcodes.map(e=>0)
+                }
+
+                dataByMaps[e.game_mode][mapcodes.indexOf(e.map_name)]++;
+                
+            })
+            console.log(dataByMaps)
+            /**
+             * top header bar information 
+             */
+            const headContainer = document.querySelector('#tele-container');
+            $('#steam-player-count').text(data.activePlayerSteam);
+            $('#players-count').text(logPlayerCount)
+            $('#total-matches').text(data.matchCount)
+            $('#maps-count').text(data.mapCount)
+            $('#total-days').text(data.dayCount)
+
+            /**
+             * TPP & FPP Chart
+             */
+            new Chart(document.querySelector('#tpp-fpp'), {
+                type: 'pie',
+                data: {
+                    datasets: [
+                        { 
+                            data: [((tfpp.tpp/data.matches.length)*100).toFixed(2), ((tfpp.fpp/data.matches.length) * 100).toFixed(2)],
+                            fill: true,
+                            backgroundColor: [
+                                'rgb(92, 128, 188)',
+                                'rgb(206, 83, 116)'
+                            ] 
+                        }
+                    ],
+                    labels: [
+                        'TPP', 'FPP'
+                    ]
+                }   
+            });
+
+            /**
+             * Chart 'Match Distribution by Game Modes' 
+             */
+            document.querySelector('#mdist-region').height = 50;
+            new Chart(document.querySelector('#match-distribution'), {
+                type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: modeCount.map(e=>Number(e/data.matches.length*100).toFixed(2)),
+                            fill: true,
+                            backgroundColor: [
+                                'rgb(232, 211, 63)',
+                                'rgb(209, 123, 15)',
+                                'rgb(183, 173, 207)',
+                                'rgb(241, 81, 82)',
+                                'rgb(53, 59, 60)',
+                                'rgb(64, 112, 118)'
+                            ]
+                        }
+                    ],
+                    labels: modeCode.map(e=>e.toUpperCase())
+                }
+            });
+
+            /** Chart 'Match Distribution by Region' */
+            new Chart(document.querySelector('#mdist-region'), {
+                type: 'bar',
+                data: {
+                    labels: Object.values(MAPPINGS).sort().map(l => {
+                        if(l === 'krjp') return 'Kor';
+                        else return l[0].toUpperCase() + l.substr(1);
+                    }),
+                    datasets: [{
+                        label: 'Solo',
+                        backgroundColor: "rgb(232, 211, 63)",
+                        data: dataByRegion['solo'].map( v => Number(v/ _.sumBy(dataByRegion['solo']) * 100 ).toFixed(2)),
+                    }, {
+                        label: 'Duo',
+                        backgroundColor: "rgb(209, 123, 15)",
+                        data: dataByRegion['duo'].map( v => Number(v/ _.sumBy(dataByRegion['duo']) * 100 ).toFixed(2)),
+                    }, {
+                        label: 'Squad',
+                        backgroundColor: "rgb(183, 173, 207)",
+                        data: dataByRegion['squad'].map( v => Number(v/ _.sumBy(dataByRegion['squad']) * 100 ).toFixed(2)),
+                    }, {
+                        label: 'Solo FPP',
+                        backgroundColor: 'rgb(241, 81, 82)',
+                        data: dataByRegion['solo-fpp'].map( v => Number(v/ _.sumBy(dataByRegion['solo-fpp']) * 100 ).toFixed(2)),
+                    }, {
+                        label: 'Duo FPP',
+                        backgroundColor: 'rgb(53, 59, 60)',
+                        data: dataByRegion['duo-fpp'].map( v => Number(v/ _.sumBy(dataByRegion['dup-fpp']) * 100 ).toFixed(2)),
+                    }, {
+                        label: 'Squad FPP',
+                        backgroundColor: 'rgb(64, 112, 118)',
+                        data: dataByRegion['squad-fpp'].map( v => Number(v/ _.sumBy(dataByRegion['squad-fpp']) * 100 ).toFixed(2)),
+                    }],
+                },
+                options: {
+                    tooltips: {
+                        displayColors: true,
+                    },
+                    scales: {
+                    xAxes: [{
+                        stacked: true,
+                        gridLines: {
+                        display: false,
+                        }
+                    }],
+                    yAxes: [{
+                        stacked: true,
+                        ticks: {
+                            min: 0,
+                            max: 100.00
+                        },
+                        type: 'linear',
+                    }]
+                    },
+                    responsive: true
+                }
+            });
+
+            /**
+             * Chart 'Match Distribution by Maps'
+             */
+            if(!isMobile()) {
+                document.querySelector('#mdist-region').height = 50;
+            }
+            new Chart(document.querySelector('#mdist-maps'), {
+                type: 'bar',
+                data: {
+                    labels: Object.values(data.mapNames),
+                    datasets: [
+                        {
+                            label: 'Solo',
+                            backgroundColor: "rgb(232, 211, 63)",
+                            data: dataByMaps['solo'].map( v => Number(v/ _.sumBy(dataByMaps['solo']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Duo',
+                            backgroundColor: 'rgb(209, 123, 15)',
+                            data: dataByMaps['duo'].map( v => Number(v/ _.sumBy(dataByMaps['duo']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Squad',
+                            backgroundColor: 'rgb(183, 173, 207)',
+                            data: dataByMaps['squad'].map( v => Number(v/ _.sumBy(dataByMaps['squad']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Solo FPP',
+                            backgroundColor: 'rgb(241, 81, 82)',
+                            data: dataByMaps['solo-fpp'].map( v => Number(v/ _.sumBy(dataByMaps['solo_fpp']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Duo FPP',
+                            backgroundColor: 'rgb(53, 59, 60)',
+                            data: dataByMaps['duo-fpp'].map( v => Number(v/ _.sumBy(dataByMaps['duo-fpp']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Squad FPP',
+                            backgroundColor: 'rgb(64, 112, 118)',
+                            data: dataByMaps['squad-fpp'].map( v => Number(v/ _.sumBy(dataByMaps['squad-fpp']) * 100 ).toFixed(2)),
+                        }
+                    ],
+                },
+                options: {
+                    tooltips: {
+                        displayColors: true,
+                    },
+                    scales: {
+                    xAxes: [{
+                        stacked: true,
+                        gridLines: {
+                        display: false,
+                        }
+                    }],
+                    yAxes: [{
+                        stacked: true,
+                        ticks: {
+                            min: 0,
+                            max: 100.00
+                        },
+                        type: 'linear',
+                    }]
+                    },
+                    responsive: true
+                }
+            });
+
+
+            /**
+             * Chart 'Region Distribution by Maps'
+             */
+            new Chart(document.querySelector('#reg-maps'), {
+                type: 'bar',
+                data: {
+                    labels: Object.values(MAPPINGS).sort().map(l => {
+                        if(l === 'krjp') return 'Kor';
+                        else return l[0].toUpperCase() + l.substr(1);
+                    }),
+                    datasets: [
+                        {
+                            label: 'Miramar',
+                            backgroundColor: colors['Desert_Main'],
+                            data: mapByRegioin['Desert_Main'].map( v => Number(v/ _.sumBy(mapByRegioin['Desert_Main']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Vikendi',
+                            backgroundColor: colors['DihorOtok_Main'],
+                            data: mapByRegioin['DihorOtok_Main'].map( v => Number(v/ _.sumBy(mapByRegioin['DihorOtok_Main']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Erangel',
+                            backgroundColor: colors['Baltic_Main'],
+                            data: mapByRegioin['Baltic_Main'].map( v => Number(v/ _.sumBy(mapByRegioin['Baltic_Main']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Sanhok',
+                            backgroundColor: colors['Savage_Main'],
+                            data: mapByRegioin['Savage_Main'].map( v => Number(v/ _.sumBy(mapByRegioin['Savage_Main']) * 100 ).toFixed(2)),
+                        },
+                        {
+                            label: 'Karakin',
+                            backgroundColor: colors['Summerland_Main'],
+                            data: mapByRegioin['Summerland_Main'].map( v => Number(v/ _.sumBy(mapByRegioin['Summerland_Main']) * 100 ).toFixed(2)),
+                        }
+                    ]
+                },
+                options: {
+                    tooltips: {
+                        displayColors: true,
+                    },
+                    scales: {
+                    xAxes: [{
+                        stacked: true,
+                        gridLines: {
+                        display: false,
+                        }
+                    }],
+                    yAxes: [{
+                        stacked: true,
+                        ticks: {
+                            min: 0,
+                            max: 100.00
+                        },
+                        type: 'linear',
+                    }]
+                    },
+                    responsive: true,
+                }
+            });
+            document.querySelector('#preloader').classList.remove('active');
+            headContainer.classList.remove('dont-show');
+        }
+    })
+
+}

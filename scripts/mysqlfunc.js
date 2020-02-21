@@ -45,9 +45,37 @@ module.exports = {
         
         await this.query(sql);
 
-        return this.fetchOne('select LAST_INSERT_ID()');
+        return await this.fetchOne('select LAST_INSERT_ID()');
     },
 
+    update: async function(table, row, where){
+        let sql = 'UPDATE ' + table + ' SET ';
+        let fields = [];
+        
+        for(let f in row){
+            fields.push('`' + f + '`="' + row[f] + '"')
+        }
+        
+        sql += fields.join(', ');
+        
+        if(where){
+            sql += ' WHERE ' + where;
+        }
+        await this.query(sql);
+
+        return await this.fetchOne('SELECT ROW_COUNT()');
+    },
+    
+    fetchOneRow: async function(sql){
+        if(sql.toLocaleLowerCase().indexOf('limit')===-1){
+
+            sql += ' LIMIT 1';
+        }
+
+        let qr = await this.query(sql);
+        return qr && qr.length ? qr[0] : false;
+
+    },
     fetchOne: async function(sql){
         if(sql.toLocaleLowerCase().indexOf('limit')===-1){
 

@@ -31,6 +31,8 @@ const configs = require('./configs.json');
 const pubgStatsJson = require('./pubg-stats.json');
 const mapNames = require('./mapName.json');
 const mapStats = require('./stats.json');
+const mysqlfunc = require('./scripts/mysqlfunc.js');
+const dbAdapter = mysqlfunc.init(configs.DBHOST, configs.DBUSER, configs.DBPASS, configs.DBNAME);
 
 /////// LOGGER  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 const transport = new winston.transports.DailyRotateFile({
@@ -410,7 +412,7 @@ server.get('/getTelemetries', async (req, res, nxt) => {
         });
         const resActivePlayersSteam = await steamApi.getPlayersCount();
         const activePlayersSteam = resActivePlayersSteam.data.response.player_count;
-        console.log(activePlayersSteam);
+
         res.json({
             status: 200,
             stats: telem,
@@ -442,6 +444,48 @@ server.get('/getTelemetries', async (req, res, nxt) => {
         res.render('500');
     }
 });
+
+server.get('/fetchTelemetryData', async (req, res, nxt) => {
+    try {
+        //get data since 'configs.TELEMETRY_STATS_TIME_PERIOD' days ago
+        let starttime = moment.utc(new Date()).subtract(configs.TELEMETRY_STATS_TIME_PERIOD, 'd').format('YYYY-MM-DD HH:mm:ss');
+
+        const telemetryLog = await new Promise((resolve, reject) => {
+            const q = `SELECT * FROM a1_matches;`;            
+            // const q = `SELECT * FROM a1_matches where date(created_at)>=date("${starttime}");`;            
+            DBPool.query(q, (err, stats) => {
+                if(err) {reject(err);}else {resolve(stats);}
+            });
+        });
+
+        let totalSql = `SELECT 
+                            COUNT(DISTINCT id) AS matchCount
+                            , COUNT(DISTINCT map_name) AS mapCount
+                            , COUNT(DISTINCT DATE(created_at)) AS dayCount
+                        FROM a1_matches`;
+
+        const totalCounts = await dbAdapter.fetchOneRow(totalSql)
+        const resActivePlayersSteam = await steamApi.getPlayersCount();
+        ////
+        const getGameSchema = await steamApi.getGameSchema();
+        const getGlobalAchievementsPercentages = await steamApi.getGlobalAchievementsPercentages();
+        ////
+
+        res.json({
+            activePlayerSteam: resActivePlayersSteam.data.response.player_count,
+            matchCount: totalCounts.matchCount,
+            mapCount: totalCounts.mapCount,
+            dayCount: totalCounts.dayCount,
+            mapNames: mapNames, 
+            getGameSchema: getGameSchema.data,
+            getGlobalAchievementsPercentages: getGlobalAchievementsPercentages.data,
+
+            matches: telemetryLog,
+        })
+    }catch(e){
+        res.json({});
+    }
+})
 
 //server.use('/api', pubgStatsApi);
 
