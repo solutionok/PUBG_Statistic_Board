@@ -121,5 +121,15 @@ module.exports = {
             return fv;
         }
 
+    },
+    fetchAll: async function(sql){
+        let qr = await this.query(sql);
+        if(!qr){
+
+            return false;
+        }else{
+            return qr;
+        }
+
     }
 }

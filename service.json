@@ -1,0 +1,16 @@
+{
+  "apps": [
+    {
+      "name": "pubg-main",
+      "script": "./server.js",
+      "exec_mode": "cluster",
+      "instances": 2,
+      "node_args": "--name server"
+    },
+    {
+      "name": "pubg-telemetry-finder",
+      "script": "./telemetry-finder.js",
+      "node_args": "--name sync"
+    }
+  ]
+}

@@ -64,8 +64,7 @@ const IpLookup = require('./ip-lookup')(axios, configs);
 const ACCESS_CTRL_MAX_AGE = 3600 * 2; // 2 hours
 const MYSQL_POOL_MAX_CONNECTIONS = 5; 
 const COOKIE_MAX_AGE = 3600; //  1hr; for prod, make it 7 days
-const BASEDIR = './';
-// const BASEDIR = '/srv/www/pubg-stats/';
+const BASEDIR = __dirname + '/';
 const VIEWSDIR = BASEDIR + 'views';
 const ASSETSDIR = BASEDIR + 'assets';
 const FAVSDIR = BASEDIR + 'favs';
@@ -447,40 +446,46 @@ server.get('/getTelemetries', async (req, res, nxt) => {
 
 server.get('/fetchTelemetryData', async (req, res, nxt) => {
     try {
-        //get data since 'configs.TELEMETRY_STATS_TIME_PERIOD' days ago
         let starttime = moment.utc(new Date()).subtract(configs.TELEMETRY_STATS_TIME_PERIOD, 'd').format('YYYY-MM-DD HH:mm:ss');
 
-        const telemetryLog = await new Promise((resolve, reject) => {
-            const q = `SELECT * FROM a1_matches;`;            
-            // const q = `SELECT * FROM a1_matches where date(created_at)>=date("${starttime}");`;            
-            DBPool.query(q, (err, stats) => {
-                if(err) {reject(err);}else {resolve(stats);}
-            });
-        });
+        let where = `game_mode IN ('solo','solo-fpp','squad','squad-fpp','duo','duo-fpp') 
+        and map_name IN ('Summerland_Main','Savage_Main','Desert_Main','Baltic_Main','DihorOtok_Main')`;
 
         let totalSql = `SELECT 
                             COUNT(DISTINCT id) AS matchCount
+                            , SUM(IF(game_mode in ('solo', 'squad', 'duo'),1,0)) AS tppCount
                             , COUNT(DISTINCT map_name) AS mapCount
                             , COUNT(DISTINCT DATE(created_at)) AS dayCount
-                        FROM a1_matches`;
+                            , SUM(player_count) AS playerCount
+                        FROM a1_matches where ${where}`;
 
-        const totalCounts = await dbAdapter.fetchOneRow(totalSql)
+        const totalCounts = await dbAdapter.fetchOneRow(totalSql);
+
+        let regionAndModeSql = `SELECT region_code, game_mode ,COUNT(id) AS c FROM a1_matches
+                            WHERE ${where} GROUP BY region_code, game_mode;`;
+        const regionAndMode = await dbAdapter.fetchAll(regionAndModeSql);
+
+        let mapAndModeSql = `SELECT map_name, game_mode ,COUNT(id) AS c FROM a1_matches
+                            WHERE ${where} GROUP BY map_name, game_mode;`;
+        const mapAndMode = await dbAdapter.fetchAll(mapAndModeSql);
+
+        let regionAndMapSql = `SELECT region_code, map_name ,COUNT(id) AS c FROM a1_matches
+                            WHERE ${where} GROUP BY region_code, map_name;`;
+        const regionAndMap = await dbAdapter.fetchAll(regionAndMapSql);
+
         const resActivePlayersSteam = await steamApi.getPlayersCount();
-        ////
-        const getGameSchema = await steamApi.getGameSchema();
-        const getGlobalAchievementsPercentages = await steamApi.getGlobalAchievementsPercentages();
-        ////
-
         res.json({
             activePlayerSteam: resActivePlayersSteam.data.response.player_count,
             matchCount: totalCounts.matchCount,
+            tppCount: totalCounts.tppCount,
             mapCount: totalCounts.mapCount,
             dayCount: totalCounts.dayCount,
+            playerCount: totalCounts.playerCount,
+            regionAndMode: regionAndMode,
+            mapAndMode: mapAndMode,
+            regionAndMap: regionAndMap,
             mapNames: mapNames, 
-            getGameSchema: getGameSchema.data,
-            getGlobalAchievementsPercentages: getGlobalAchievementsPercentages.data,
 
-            matches: telemetryLog,
         })
     }catch(e){
         res.json({});

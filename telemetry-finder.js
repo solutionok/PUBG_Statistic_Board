@@ -1,252 +1,397 @@
-/*
-    * Using the random samples returned from the PUBG
-    * API endpoints for all regions, across all platforms
-    * update the regional_modes_stats table. Meant for 
-    * cron for scheduled updates
-*/
-const mysql = require('mysql');
 const axios = require('axios');
-const path = require('path');
+const { Sequelize } = require('sequelize');
+const moment = require('moment');
+const _ = require('lodash');
 const fs = require('fs');
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
-const fsp = fs.promises;
-
-
+var nodemailer = require('nodemailer');
 const configs = require('./configs.json');
-const { sleep } = require('./utils');
+const mysqlfunc = require('./scripts/mysqlfunc.js');
 
-const conn = mysql.createConnection({
-    host: configs.DBHOST,
-    user: configs.DBUSER,
-    password: configs.DBPASS,
-    database: configs.DBNAME
-});
-const adapter = new FileSync('./stats.json');
-const jsondb = low(adapter);
+//for now, will apply for steam(pc players)
+const platforms = ['steam', 'kakao', 'tournament', 'xbox', 'psn', 'console'/****/];
 
-const SAVEPATH = path.resolve('./telemetries');
-const baseURL = "https://api.pubg.com/";
-const headers = {
-    "Authorization": `Bearer ${configs.APIkey}`,
-    "Accept": "application/vnd.api+json",
-    "Accept-Encoding": "gzip"
+const REGULAR_MODES = [
+  'duo',
+  'duo-fpp',
+  'solo',
+  'solo-fpp',
+  'squad',
+  'squad-fpp',
+];
+
+const REGIONS = {
+  as: 'Asia',
+  eu: 'Europe',
+  jp: 'Japan',
+  kakao: 'Kakao',
+  krjp: 'Korea',
+  na: 'North America',
+  oc: 'Oceania',
+  ru: 'Russia',
+  sa: 'South and Central America',
+  sea: 'South East Asia',
+  tournament: 'Tournaments',
 };
-const axiosInstance = axios.create({ baseURL, headers });
-const platforms = ['steam', 'console', 'kakao'];
+
 const platformRegions = [
-    { region: 'pc-as', name: 'Asia' },
-    { region: 'pc-eu', name: 'Europe' },
-    { region: 'pc-jp', name: 'Japan' },
-    { region: 'pc-kakao', name: 'Kakao' },
-    { region: 'pc-krjp', name: 'Korea' },
-    { region: 'pc-na', name: 'North America' },
-    { region: 'pc-oc', name: 'Oceania' },
-    { region: 'pc-ru', name: 'Russia' },
-    { region: 'pc-sa', name: 'South and Central America'},
-    { region: 'pc-sea', name: 'South East Asia'},
-    { region: 'psn-eu', name: 'Europe'},
-    { region: 'psn-as', name: 'Asia'},
-    { region: 'psn-na', name: 'North America'},
-    { region: 'psn-oc', name: 'Oceania' },
-    { region: 'xbox-as', name: 'Asia'},
-    { region: 'xbox-eu', name: 'Europe'},
-    { region: 'xbox-na', name: 'North America'},
-    { region: 'xbox-oc', name: 'Oceania'},
-    { region: 'xbox-sa', name: 'South and Central America'}
-];
-const modes = [
-    'solo', 'duo', 'squad', 'solo-fpp', 'duo-fpp', 'squad-fpp'
+  'pc-as',
+  'pc-eu',
+  'pc-jp',
+  'pc-kakao',
+  'pc-krjp',
+  'pc-na',
+  'pc-oc',
+  'pc-ru',
+  'pc-sa',
+  'pc-sea',
+  'pc-tournament',
+  'psn-as',
+  'psn-eu',
+  'psn-na',
+  'psn-oc',
+  'xbox-as',
+  'xbox-eu',
+  'xbox-na',
+  'xbox-oc',
+  'xbox-sa',
 ];
 
-const updater = async () => {
-    const cached = await new Promise((rs, rj) => {
-        conn.query(`SELECT match_id from matches`, (e, mts) => {
-            if(e) {
-                console.log('[x] Could not fetch cached matches');
-                console.error(e);
-                rs();
-            }
-            else {
-                mts = mts.map(mo => mo.match_id);
-                console.log('[-] Cached: ');
-                console.log(mts);
-                rs(mts);
-            }
-        })
-    });
-    const stats = {};
-    const ids = [];
-    for(const plr of platformRegions) {
-        let shard;
-        if(plr.region.startsWith('pc')) {
-            shard = 'steam';
-        }
-        else if(plr.region.startsWith('xbox')) {
-            shard = 'xbox';
-        }
-        else if(plr.region.startsWith('psn')) {
-            shard = 'xbox';
-        }
-        const plat = plr.region.split('-')[0];
-        const counts = {
-            solo: 0, 'solo-fpp': 0, duo: 0, 'duo-fpp': 0, squad: 0, 'squad-fpp': 0, total: 0
-        };
-        let reg = plr.name;
-        try {
-            console.log(`[-] Getting samples for ${plr.region}`);
-            const resSamples = await axiosInstance.get(`shards/${plr.region}/samples`);
-            const samples = resSamples.data.data.relationships.matches.data;
-            let count = 0;
-            if(samples && samples.length) {
-                console.log(`[-] Found ${samples.length} sample matches`);
-                for(const samp of samples) {
-                    /**
-                     * why commented? just for test?
-                     */
-                    if(count >= 2) break;
-                    // if(count >= configs.SAMPLING_RATE) break;
+const matcherPcRegionPC = /\.pc-.*\.(as|eu|jp|kakao|krjp|na|oc|ru|sa|sea|tournament)\./;
+// const matcherPcRegionPC = /\.(custom|training|tdm|pc\-).*\.(as|eu|jp|kakao|krjp|na|oc|ru|sa|sea|tournament)\./;
 
-                    const mid = samp.id;
-                    // if(cached.indexOf(mid) !== -1) {
-                    //     console.log(`Match: ${mid} is already cached`);
-                    //     continue;
-                    // }
-                    try {
-                        const resMatch = await axiosInstance.get(`shards/${shard}/matches/${mid}`);
-                        const match = resMatch.data;
-                        const matAttrs = match.data.attributes;
-                        console.log(`[-] Got match with ID: ${mid}  Mode: ${matAttrs.gameMode}  Map: ${matAttrs.mapName}`);
-                        ids.push(mid);
-                        counts[matAttrs.gameMode]++;
-                        counts.total++;
-                        if(stats[reg]) {
-                            if(stats[reg][matAttrs.mapName]) {
-                                if(stats[reg][matAttrs.mapName][matAttrs.gameMode]) {
-                                    stats[reg][matAttrs.mapName][matAttrs.gameMode]++;
-                                }
-                                else {
-                                    if(modes.indexOf(matAttrs.gameMode) !== -1) {
-                                        stats[reg][matAttrs.mapName][matAttrs.gameMode] = 1;
-                                    }
-                                }
-                            }
-                            else {
-                                stats[reg][matAttrs.mapName] = {
-                                    solo: 0, duo: 0, squad: 0, 'solo-fpp': 0, 'duo-fpp': 0, 'squad-fpp': 0
-                                };
-                                if(modes.indexOf(matAttrs.gameMode) !== -1) {
-                                    stats[reg][matAttrs.mapName][matAttrs.gameMode]++;
-                                }
-                            }
-                        }
-                        else {
-                            stats[reg] = {};
-                            stats[reg][matAttrs.mapName] = {
-                                solo: 0, duo: 0, squad: 0, 'solo-fpp': 0, 'duo-fpp': 0, 'squad-fpp': 0
-                            };
-                            if(modes.indexOf(matAttrs.gameMode) !== -1) {
-                                stats[reg][matAttrs.mapName][matAttrs.gameMode]++;
-                            }
-                        }
-                        count++;
-                    } catch(sampErr) {
-                        let status = 'Unknown';
-                        if(sampErr && sampErr.response && sampErr.response.status) {
-                            status = sampErr.response.status;
-                        }
-                        console.log(`[x] Error while looking up sample match: ${status}`);
-                        console.error(sampErr);
-                    }
-                    await sleep(configs.TELEMETRY_API_REQ_DELAY);
-                }
-                // update DB
-                console.log(`Total count for region ${plr.region}: ${JSON.stringify(counts)}`);
-                
-                const isUpdate = await new Promise((rs, rj) => {
-                    conn.query(`SELECT * from regional_modes_stats WHERE platform='${plat}' AND name='${plr.name}'`, (e, mts) => {
-                        rs(e ? false : true);
-                    })
-                });
-                let q;
-                if(isUpdate){
-                    q = `UPDATE regional_modes_stats SET solo= solo + ${counts.solo}, 
-                        solo_fpp= solo_fpp + ${counts['solo-fpp']}, duo= duo + ${counts.duo}, duo_fpp= duo_fpp + ${counts['duo-fpp']},
-                        squad=squad + ${counts.squad}, squad_fpp=squad_fpp + ${counts['squad-fpp']}, total= total + ${counts.total} 
-                        WHERE platform='${plat}' AND name='${plr.name}';
-                    `;
-                }else{
-                    q = `INSERT INTO regional_modes_stats SET solo= solo + ${counts.solo}, 
-                        solo_fpp= solo_fpp + ${counts['solo-fpp']}, duo= duo + ${counts.duo}, duo_fpp= duo_fpp + ${counts['duo-fpp']},
-                        squad=squad + ${counts.squad}, squad_fpp=squad_fpp + ${counts['squad-fpp']}, total= total + ${counts.total} 
-                        , platform='${plat}', name='${plr.name}';
-                    `;
-                }
+const dbAdapter = mysqlfunc.init(configs.DBHOST, configs.DBUSER, configs.DBPASS, configs.DBNAME);
 
-                await new Promise((resolve, reject) => {
-                    
-                    conn.query(q, (uerr, up) => {
-                        console.log(uerr, up)
-                        if(uerr) {
-                            console.error(uerr);
-                            conn.end(e => process.exit(1));
-                        }
-                        else {
-                            resolve(up);
-                        }
-                    });
-                });
-                Object.keys(stats)
-                    .forEach(r => {
-                        Object.keys(stats[r])
-                            .forEach(map => {
-                                Object.keys(stats[r][map])
-                                    .forEach(mode => {
-                                        jsondb.update(`${r}.${map}.${mode}`, c => {
-                                            c = c + stats[r][map][mode];
-                                            return c;
-                                        }).write();
-                                    });
-                            });
-                    });
-                //jsondb.write();
-            }
-            else {
-                console.log(`[-] No samples for ${plr.region}`);
-                await sleep(configs.TELEMETRY_API_REQ_DELAY);
-            }
-        } catch(sampleLookupError) {
-            console.error(sampleLookupError);
-        }
-    }
-    // write sample ids
-    let mids = ids.map(i => `(NULL, '${i}')`).join(', ');
-    const mq = `INSERT INTO matches VALUES ${mids}`;
-    if(mids && mids.length && mids.length > 0) {
-        await new Promise((res, rej) => {
-            conn.query(mq, (err, inserted) => {
-                if(err) {
-                    console.log('[x] Could not update matches table');
-                    console.error(err);
-                    res();
-                }
-                else {
-                    console.log('[*] Match ids updated');
-                }
-                res();
-            });
-        })
-        .catch(e => console.error(e));
-    }
-};
-
-if(!module.parent) {
-    let up = true;
-    setInterval(async () => {
-        if(up) {
-            up = false;
-            await updater();
-            up = true;
-        }
-    }, configs.TELEMETRY_UPDATE_INTERVAL);
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+const axioPubgApi = axios.create({
+  baseURL: 'https://api.pubg.com',
+  headers: {
+    accept: 'application/vnd.api+json',
+    Authorization: 'Bearer ' + configs.APIkey
+  }
+});
+
+async function matchesOfPlatform(platform) {
+  try{
+
+    return await new Promise((resolve, reject) => {
+      axioPubgApi.get('/shards/' + platform + '/samples')
+        .then(r => {
+          if (r.data && r.data.data)
+            resolve(r.data.data.relationships.matches.data)
+          else
+            reject([])
+        })
+    })
+  }catch(e){
+    return []
+  }
+}
+
+async function detailsOfMatch(matchID, platform) {
+  try{
+
+    return await new Promise((resolve, reject) => {
+      axioPubgApi.get('/shards/' + platform + '/matches/' + matchID)
+        .then(r => {
+  
+          // console_debug(platform, matchID, r.data.included.length)
+          if (r.data && r.data)
+            resolve(r.data)
+          else
+            resolve(false)
+        })
+    })
+  }catch(e){
+    return false;
+  }
+}
+
+function developerMailing(subject, text, attachFile){
+  var transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: 'plutoweb2020@gmail.com',
+      pass: 'XubqHaki9,Dutf'
+    }
+  });
+
+  var mailOptions = {
+    from: 'plutoweb2020@gmail.com',
+    to: 'coolpluto1114@gmail.com',
+    subject: subject,
+    text: text,
+    // attachments : [
+    //     {path: './package.json'} // stream this file
+    // ]
+  };
+
+  if(attachFile){
+    mailOptions['attachments'] = [
+        {path: attachFile} // stream this file
+    ]
+  }
+
+
+  transporter.sendMail(mailOptions, function(error, info){
+    if (error) {
+      console.log(error);
+    } else {
+      console.log('Email sent: ' + info.response);
+    }
+  });
+
+}
+
+function console_debug(){
+  const args = Array.from(arguments);
+  let msg = args.reduce((o,i)=>{
+    return o + ' ' + (typeof i == 'Object' ? JSON.stringify(i) : i)
+  }, '')
+
+  fs.appendFile('z.finder.log', msg + "\n", 'utf-8', (r)=>{
+    console.log(msg)
+  })
+
+}
+
+async function regionByAssetUrl(assetUrl) {
+  try{
+
+    return await new Promise((resolve, reject) => {
+      axios.get(assetUrl)
+        .then(r => {
+          if (r.data && r.data.length) {
+            let regionMatches = r.data[0] && r.data[0].MatchId ? r.data[0].MatchId.match(matcherPcRegionPC) : ''
+
+            if (!regionMatches || !regionMatches.length) {
+              console_debug('----Unknown region detected - ', r.data[0] && r.data[0].MatchId ? r.data[0].MatchId : r.data[0])
+              resolve('')
+            } else {
+  
+              if (Object.keys(REGIONS).indexOf(regionMatches[1]) !== -1) {
+                // console_debug('region match possition 1', r.data[0].MatchId)
+                resolve(regionMatches[1])
+              } else if (regionMatches.length >= 2 && Object.keys(REGIONS).indexOf(regionMatches[2]) !== -1) {
+  
+                // console_debug('region match possition 2', r.data[0].MatchId)
+                resolve(regionMatches[2])
+              } else {
+                console_debug('----Unknown region detected - ', r.data[0].MatchId)
+                resolve('')
+              }
+            }
+  
+          }
+          else
+            reject({})
+        })
+    })
+  }catch(e){
+    return false;
+  }
+}
+
+async function cacheMatch(matchDetails, logid){
+  try{
+
+    if(await dbAdapter.fetchOne('select * from a1_matches where uuid="'+matchDetails.data.id+'"')){
+      return false;
+    }
+    let pcount = _.countBy(matchDetails.included, e => e.type === 'participant').true;
+    console_debug('Trying cache for UUID: ', matchDetails.data.id)
+    let row = {
+      uuid: matchDetails.data.id,
+      created_at: moment.utc(matchDetails.data.attributes.createdAt).format('YYYY-MM-DD HH:mm:ss'),
+      duration: parseInt(matchDetails.data.attributes.duration),
+      season_state: matchDetails.data.attributes.seasonState,
+      is_custom_match: matchDetails.data.attributes.isCustomMatch * 1,
+      match_type: matchDetails.data.attributes.matchType,
+      stats: matchDetails.data.attributes.stats * 1,
+      game_mode: matchDetails.data.attributes.gameMode,
+      title_id: matchDetails.data.attributes.titleId,
+      shard_id: matchDetails.data.attributes.shardId,
+      map_name: matchDetails.data.attributes.mapName,
+      player_count: pcount ? pcount : 0,
+      region_code: '',
+      logid: logid
+    };
+  
+    let asset = _.find(matchDetails.included, { id: matchDetails.data.relationships.assets.data[0].id })
+    if (asset) {
+      let rcode = await regionByAssetUrl(asset.attributes.URL)
+      if(!rcode) return false;
+      row.region_code = rcode;
+    }
+  
+    try{
+      return dbAdapter.insert('a1_matches', row)
+        .then(r => {
+          return r;
+        })
+    }catch(e){
+      return false;
+    }
+  }catch(e){
+    return false;
+  }
+}
+
+async function fetchTopPlayers(ids, platform){
+  try{
+    return await new Promise((resolve, reject) => {
+      axioPubgApi.get('/shards/'+platform+'/players?filter[playerIds]=' + ids.join(','))
+        .then(r => {
+          if (r.data && r.data.data && r.data.data.length)
+            resolve(r.data.data)
+          else
+            reject(false)
+        })
+    })
+  }catch(e){
+    return false
+  }
+}
+
+function filterTopPlayerIds(participants, topPlayersIdCache){
+  let ids =[], _player = null;
+
+  for(let _tp in participants){
+    _player = participants[_tp];
+
+    if(_player.type!='participant'
+       || !_player['attributes']
+       || !_player['attributes']['stats'] 
+       || !_player['attributes']['stats']['playerId'] 
+       || _player['attributes']['stats']['winPlace'] > configs.TELEMETRY_TOP_PLAYER_LIMIT
+       || topPlayersIdCache.indexOf(_player['attributes']['stats']['playerId']) !== -1
+    ) {
+      continue;
+    }
+
+    ids.push(_player['attributes']['stats']['playerId'] );
+  }
+
+  return ids;
+}
+
+async function cacheMatchesOfWinners(topPlayers, platform, logid, cachedUUID){
+  let matchids = []
+  for(let tp in topPlayers){
+    if(!topPlayers[tp]['relationships']
+      || !topPlayers[tp]['relationships']['matches']
+      || !topPlayers[tp]['relationships']['matches']['data']
+      || !topPlayers[tp]['relationships']['matches']['data'].length
+    ){
+      continue;
+    }
+
+    for(let pm in topPlayers[tp]['relationships']['matches']['data']){
+      let matchid = topPlayers[tp]['relationships']['matches']['data'][pm].id
+      if(cachedUUID.indexOf(matchid)!==-1) continue;
+      
+      
+      //fetch a match      
+      matchinfo = await detailsOfMatch(matchid, platform)
+      if(!matchinfo) {
+        console_debug('failed to fetch the match', matchid)
+        continue;
+      }
+      //insert a match into database
+      let insertID = await cacheMatch(matchinfo, logid);
+      
+      if(insertID){
+        console_debug('UUID: ' + matchid + ' Created ', insertID, 'From player ', topPlayers[tp].id);
+        matchids.push(matchid);
+      }else{
+        console_debug('UUID: ' + matchid + ' an issue while cache ', 'From player ', topPlayers[tp].id);
+      }
+    }
+
+  }
+  return matchids;
+}
+
+async function pulldown() {
+  let matches, matchDetails, cachedUUID;
+  let topPlayersIdCache = [];
+  
+  let oldlogname = 'z.finder'+moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss')+'.log';
+  fs.rename('z.finder.log', oldlogname, (r)=>{
+    console.log(r)
+  })
+
+  //mailing
+  developerMailing('PUBG: new polling started'
+                  , 'new polling started at UTC ' + moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss')
+                  , oldlogname);
+
+  cachedUUID = await dbAdapter.fetchCol('select uuid from a1_matches');
+
+  let logid = await dbAdapter.insert('a1_matches_log', { starttime: moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss') });
+  console_debug('---------------------- new session started at ' + moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss'))
+
+  //platform level loop
+  for (let _p in platforms) {
+
+    matches = await matchesOfPlatform(platforms[_p]);
+    if (!matches || !matches.length) continue;
+    console_debug('platform-region : ' + platforms[_p] + ', total matches : ' + matches.length + ', endpoint url : ' + '/shards/' + platforms[_p] + '/samples')
+
+    //match level loop
+    for (let _m in matches) {
+      if(cachedUUID.indexOf(matches[_m].id)!==-1) {
+        console_debug('skip for uuid ', matches[_m].id)
+        continue;
+      }
+
+      //fetch a match      
+      matchDetails = await detailsOfMatch(matches[_m].id, platforms[_p])
+      if(!matchDetails) {
+        console_debug('failed to fetch the match', matches[_m].id)
+        continue;
+      }
+
+      //insert a match into database
+      let insertID = await cacheMatch(matchDetails, logid);
+
+      if(insertID){
+        console_debug('UUID: ' + matches[_m].id + ' Created ', insertID);
+        cachedUUID.push(matches[_m].id);
+
+        //filter top winner players only
+        let _playerIds = filterTopPlayerIds(matchDetails.included, topPlayersIdCache)
+        if(!_playerIds || !_playerIds.length)continue;
+        topPlayersIdCache = topPlayersIdCache.concat(_playerIds)
+
+
+        //cache matches from top players history
+        let topPlayers = await fetchTopPlayers(_playerIds, platforms[_p]);
+        if(!topPlayers || !topPlayers.length) continue;
+        
+        let matchids = await cacheMatchesOfWinners(topPlayers, platforms[_p], logid, cachedUUID);
+        cachedUUID = cachedUUID.concat(matchids);
+        
+      }else{
+        console_debug('UUID: ' + matches[_m].id + ' an issue while cache');
+      }
+
+    }
+
+  }
+
+}
+
+async function pullcall() {
+  await pulldown().then(r => {
+
+    setTimeout(function () {
+
+      pullcall();
+    }, 5000)
+  })
+}
+
+pullcall();
