@@ -146,7 +146,6 @@ const initCharts = () => {
                 'Other': 'rgb(101, 101, 102)'
             };
             let modeCode = [ 'solo', 'duo', 'squad', 'solo-fpp', 'duo-fpp', 'squad-fpp'];
-            let mapcodes = Object.keys(data.mapNames)
 
             /**
              * top header bar information 
@@ -161,23 +160,35 @@ const initCharts = () => {
             /**
              * TPP & FPP Chart
              */
-            let ttpPercent = Number(data.tppCount/data.matchCount*100).toFixed(2);
+            console.log(data.regionCount)
             new Chart(document.querySelector('#tpp-fpp'), {
                 type: 'pie',
                 data: {
                     datasets: [
                         { 
-                            data: [ttpPercent, Number(100-ttpPercent).toFixed(2)],
+                            data: Object.values(MAPPINGS).map(l => {
+                                let v = _.find(data.regionCount, {region_code:l});
+                                return Number( (v ? v.c : 0) / data.matchCount * 100 ).toFixed(2)
+                            }),
                             fill: true,
                             backgroundColor: [
-                                'rgb(92, 128, 188)',
-                                'rgb(206, 83, 116)'
+                                '#5C80BC',
+                                '#CE5374',
+                                '#353B3C',
+                                '#407076',
+                                '#E8D33F',
+                                '#D17B0F',
+                                '#B7ADCF',
+                                '#00B050',
+                                '#C37DC4',
+                                '#7030A0'
                             ] 
                         }
                     ],
-                    labels: [
-                        'TPP', 'FPP'
-                    ]
+                    labels: Object.values(MAPPINGS).map(l => {
+                        if(l === 'krjp') return 'KOR';
+                        else return l.toUpperCase();
+                    })
                 }   
             });
 
@@ -203,7 +214,8 @@ const initCharts = () => {
                             ]
                         }
                     ],
-                    labels: modeCode.map(e=>e.toUpperCase())
+                    labels: ['Solo', 'Duo', 'Squad', 'Solo-FPP', 'Duo-FPP', 'Squad-FPP'],
+                    // labels: modeCode.map(e=>e.toUpperCase())
                 }
             });
 
@@ -222,12 +234,16 @@ const initCharts = () => {
                 return re;
             })()
             
+            if(!isMobile()) {
+                document.querySelector('#mdist-region').height = 50;
+            }
+
             new Chart(document.querySelector('#mdist-region'), {
                 type: 'bar',
                 data: {
                     labels: Object.values(MAPPINGS).map(l => {
-                        if(l === 'krjp') return 'Kor';
-                        else return l[0].toUpperCase() + l.substr(1);
+                        if(l === 'krjp') return 'KOR';
+                        else return l.toUpperCase();
                     }),
                     datasets: [{
                         label: 'Solo',
@@ -299,12 +315,12 @@ const initCharts = () => {
             })()
             
             if(!isMobile()) {
-                document.querySelector('#mdist-region').height = 50;
+                document.querySelector('#mdist-maps').height = 50;
             }
             new Chart(document.querySelector('#mdist-maps'), {
                 type: 'bar',
                 data: {
-                    labels: Object.values(data.mapNames),
+                    labels: Object.values(data.mapNames).map(n=>n.indexOf('Erangel')!==-1?'Erangel':n),
                     datasets: [
                         {
                             label: 'Solo',
@@ -362,7 +378,6 @@ const initCharts = () => {
                 }
             });
 
-            
             /**
              * Chart 'Region Distribution by Maps'
              */
@@ -370,7 +385,7 @@ const initCharts = () => {
                 let re = {}
                 
                 let sumByRegions = Object.values(MAPPINGS).map(region=>data.regionAndMap.reduce((sum, v)=>sum+(v.region_code==region?v.c*1:0),0)) 
-                mapcodes.forEach((map)=>{
+                Object.keys(data.mapNames).forEach((map)=>{
                     re[map] = Object.values(MAPPINGS).map((region,i)=>{
                         let v = _.find(data.regionAndMap, {region_code: region, map_name: map})
                         return sumByRegions[i] && v ? Number(v.c/sumByRegions[i]*100).toFixed(2) : 0
@@ -378,12 +393,17 @@ const initCharts = () => {
                 });
                 return re;
             })()
+
+            if(!isMobile()) {
+                document.querySelector('#reg-maps').height = 50;
+            }
+
             new Chart(document.querySelector('#reg-maps'), {
                 type: 'bar',
                 data: {
                     labels: Object.values(MAPPINGS).map(l => {
-                        if(l === 'krjp') return 'Kor';
-                        else return l[0].toUpperCase() + l.substr(1);
+                        if(l === 'krjp') return 'KOR';
+                        else return l.toUpperCase();
                     }),
                     datasets: [
                         {

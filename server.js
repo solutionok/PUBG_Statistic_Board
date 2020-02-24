@@ -453,13 +453,16 @@ server.get('/fetchTelemetryData', async (req, res, nxt) => {
 
         let totalSql = `SELECT 
                             COUNT(DISTINCT id) AS matchCount
-                            , SUM(IF(game_mode in ('solo', 'squad', 'duo'),1,0)) AS tppCount
                             , COUNT(DISTINCT map_name) AS mapCount
                             , COUNT(DISTINCT DATE(created_at)) AS dayCount
                             , SUM(player_count) AS playerCount
                         FROM a1_matches where ${where}`;
 
         const totalCounts = await dbAdapter.fetchOneRow(totalSql);
+
+        let regionCountSql = `SELECT count(id) as c, region_code FROM a1_matches
+                            WHERE ${where} GROUP BY region_code;`;
+        const regionCount = await dbAdapter.fetchAll(regionCountSql);
 
         let regionAndModeSql = `SELECT region_code, game_mode ,COUNT(id) AS c FROM a1_matches
                             WHERE ${where} GROUP BY region_code, game_mode;`;
@@ -477,7 +480,7 @@ server.get('/fetchTelemetryData', async (req, res, nxt) => {
         res.json({
             activePlayerSteam: resActivePlayersSteam.data.response.player_count,
             matchCount: totalCounts.matchCount,
-            tppCount: totalCounts.tppCount,
+            regionCount: regionCount,
             mapCount: totalCounts.mapCount,
             dayCount: totalCounts.dayCount,
             playerCount: totalCounts.playerCount,
@@ -491,8 +494,6 @@ server.get('/fetchTelemetryData', async (req, res, nxt) => {
         res.json({});
     }
 })
-
-//server.use('/api', pubgStatsApi);
 
 // check for env vars
 if(process.env.PUBGSTATS_HOST && process.env.PUBGSTATS_PORT) {
